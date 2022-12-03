@@ -2,7 +2,7 @@
 
 _This is a smart contract that handles the creation of couses by teachers,
 and the student's registrations to the courses. Originally an assignement in
-BUTE's blockchain course, but I created it in !ink as practice for [https://metaversechampionship.gg/](PMC)_
+BUTE's blockchain course, but I created it in !ink as practice for [PMC hackathon](https://metaversechampionship.gg/)_
 
 The contract handles:
 
