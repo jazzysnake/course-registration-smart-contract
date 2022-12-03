@@ -5,19 +5,60 @@ use ink_lang as ink;
 #[ink::contract]
 mod course_reg {
     use ink_storage::Mapping;
-    use ink_storage::traits::SpreadAllocate;
+    use ink_storage::traits::{SpreadAllocate, PackedLayout, SpreadLayout};
 
-    /// Defines the storage of your contract.
-    /// Add new fields to the below struct in order
-    /// to add new static storage fields to your contract.
+    /// A university course created by a teacher
+    #[derive(PackedLayout, SpreadLayout, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(::scale_info::TypeInfo))]
+    pub struct Course {
+        /// the teacher who created the course
+        teacher: AccountId,
+        /// the name of the course
+        course_name: String,
+        /// the max number of students who can register
+        capacity: u32,
+        /// the registered students
+        registrations: Vec<AccountId>,
+        /// the starting time of the course
+        start_date: Timestamp,
+    }
+
+    /// A course registration token
+    #[derive(PackedLayout, SpreadLayout, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(::scale_info::TypeInfo))]
+    pub struct CourseRegistration {
+        /// the owner of the token
+        owner: AccountId,
+        /// the name of the course
+        course_name: String,
+    }
+
+    /// A course registration token swap proposal 
+    #[derive(PackedLayout, SpreadLayout, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(::scale_info::TypeInfo))]
+    pub struct CourseRegistrationSwapProposal {
+        /// the offered token
+        offer: CourseRegistration,
+        /// the tokens offered in exchange
+        counter_offers: Vec<CourseRegistration>
+    }
+
+    /// Contract storage
     #[ink(storage)]
     #[derive(SpreadAllocate)]
     pub struct CourseReg {
-        /// The owner of the contract, the school leader
+        /// the owner of the contract, the school leader
         owner: AccountId,
         /// the members of the school, <id, isTeacher>
-        school_members: Mapping<AccountId, bool>
+        school_members: Mapping<AccountId, bool>,
+        /// the courses created by the teachers <CourseName, Course>
+        courses: Mapping<String, Course>,
+        /// the proposed swaps <swapId, swapProposal>
+        swaps: Mapping<Hash, CourseRegistrationSwapProposal>,
+        /// the owned registration tokens <owner, tokens>
+        registrations: Mapping<AccountId, Vec<CourseRegistration>>,
     }
+
     #[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
     #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
     pub enum Error {
@@ -27,9 +68,7 @@ mod course_reg {
 
     impl CourseReg {
 
-        /// Constructor that initializes the `bool` value to `false`.
-        ///
-        /// Constructors can delegate to other constructors.
+        /// Default constructor that initializes the necessary values
         #[ink(constructor)]
         pub fn default() -> Self {
             ink_lang::utils::initialize_contract(|contract: &mut Self| {
