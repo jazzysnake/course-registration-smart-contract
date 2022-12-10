@@ -116,7 +116,7 @@ mod course_reg {
             return Ok(());
         }
 
-        /// Returns if the account is a school_member
+        /// Returns true if the account is a school_member
         #[ink(message)]
         pub fn is_school_member(&self, account: AccountId) -> bool {
             self.is_school_member_inner(account)
@@ -126,7 +126,7 @@ mod course_reg {
             self.school_members.contains(account)
         }
 
-        /// Returns if the account is a teacher
+        /// Returns true if the account is a teacher
         #[ink(message)]
         pub fn is_teacher(&self, account: AccountId) -> bool {
             self.is_teacher_inner(account)
@@ -184,151 +184,224 @@ mod course_reg {
             }
             course.registrations.push(caller);
             self.courses.insert(&course_id, &course);
-            self.add_registration(course_id);
-            Ok(())
-        }
+                self.add_registration(course_id, caller);
+                Ok(())
+            }
 
-        /// creates a CourseRegistration token for the course with course_id
-        /// and the caller becomes the owner of the token
-        fn add_registration(&mut self, course_id: [u8;32]) {
-            let caller = Self::env().caller();
-            let course_reg = CourseRegistration { owner: caller, course_id};
-            if !self.registrations.contains(caller) {
-                let mut registrations = Vec::new();
+            /// creates a CourseRegistration token for the course with course_id
+            /// and the caller becomes the owner of the token
+            fn add_registration(&mut self, course_id: [u8;32], owner: AccountId) {
+                let course_reg = CourseRegistration { owner, course_id};
+                if !self.registrations.contains(owner) {
+                    let mut registrations = Vec::new();
+                    registrations.push(course_reg);
+                    self.registrations.insert(&owner, &registrations);
+                    return;
+                }
+                let mut registrations = self.registrations.get(owner).unwrap();
                 registrations.push(course_reg);
+                self.registrations.insert(&owner, &registrations);
+            }
+
+            /// Gets the caller's CourseRegistration tokens
+            #[ink(message)]
+            pub fn get_own_registrations(&self) -> Result<Vec<CourseRegistration>,Error> {
+                let caller = Self::env().caller();
+                if !self.registrations.contains(caller) || 
+                    self.registrations.get(caller).unwrap().len() == 0 {
+                    return Err(Error::NoRegistrations);
+                }
+                let registrations = self.registrations.get(caller).unwrap();
+                Ok(registrations)
+            }
+
+            /// Gets the info of a university course
+            #[ink(message)]
+            pub fn get_course_info(&self, course_id: [u8; 32]) -> Result<Course,Error> {
+                if !self.courses.contains(&course_id){
+                    return Err(Error::NonexistentCourse);
+                }
+                Ok(self.courses.get(course_id).unwrap())
+            }
+
+            /// Proposes a course registration swap
+            #[ink(message)]
+            pub fn propose_swap(&mut self, course_id: [u8; 32]) -> Result<(),Error> {
+                let caller = Self::env().caller();
+                if !self.registrations.contains(caller) {
+                    return Err(Error::NoSwappableRegistrations);
+                }
+                let mut registrations = self.registrations.get(caller).unwrap();
+                let course = registrations.iter().position(|x| x.course_id == course_id);
+                if course.is_none() {
+                    return Err(Error::NoSwappableRegistrations);
+                }
+                let course = course.unwrap();
+                let course = registrations.remove(course);
                 self.registrations.insert(&caller, &registrations);
-                return;
+
+
+                let proposal = CourseRegistrationSwapProposal {
+                    offer: course,
+                    counter_offers: Vec::default(),
+                };
+                self.add_proposal(course_id, proposal);
+                Ok(())
             }
-            let mut registrations = self.registrations.get(caller).unwrap();
-            registrations.push(course_reg);
-            self.registrations.insert(&caller, &registrations);
-        }
 
-        /// Gets the caller's CourseRegistration tokens
-        #[ink(message)]
-        pub fn get_own_registrations(&self) -> Result<Vec<CourseRegistration>,Error> {
-            let caller = Self::env().caller();
-            if !self.registrations.contains(caller) || 
-                self.registrations.get(caller).unwrap().len() == 0 {
-                return Err(Error::NoRegistrations);
-            }
-            let registrations = self.registrations.get(caller).unwrap();
-            Ok(registrations)
-        }
-
-        /// Gets the info of a university course
-        #[ink(message)]
-        pub fn get_course_info(&self, course_id: [u8; 32]) -> Result<Course,Error> {
-            if !self.courses.contains(&course_id){
-                return Err(Error::NonexistentCourse);
-            }
-            Ok(self.courses.get(course_id).unwrap())
-        }
-
-        /// Proposes a course registration swap
-        #[ink(message)]
-        pub fn propose_swap(&mut self, course_id: [u8; 32]) -> Result<(),Error> {
-            let caller = Self::env().caller();
-            if !self.registrations.contains(caller) {
-                return Err(Error::NoSwappableRegistrations);
-            }
-            let mut registrations = self.registrations.get(caller).unwrap();
-            let course = registrations.iter().position(|x| x.course_id == course_id);
-            if course.is_none() {
-                return Err(Error::NoSwappableRegistrations);
-            }
-            let course = course.unwrap();
-            let course = registrations.remove(course);
-            self.registrations.insert(&caller, &registrations);
-
-
-            let proposal = CourseRegistrationSwapProposal {
-                offer: course,
-                counter_offers: Vec::default(),
-            };
-            self.add_proposal(course_id, proposal);
-            Ok(())
-        }
-
-        /// creates a Swap proposal token for the given course
-        /// and places it in the list of proposals for that course
-        fn add_proposal(&mut self,course_id: [u8; 32], proposal: CourseRegistrationSwapProposal) {
-            if !self.swaps.contains(course_id) {
-                let mut swaps = Vec::new();
+            /// creates a Swap proposal token for the given course
+            /// and places it in the list of proposals for that course
+            fn add_proposal(&mut self,course_id: [u8; 32], proposal: CourseRegistrationSwapProposal) {
+                if !self.swaps.contains(course_id) {
+                    let mut swaps = Vec::new();
+                    swaps.push(proposal);
+                    self.swaps.insert(&course_id, &swaps);
+                    return;
+                }
+                let mut swaps = self.swaps.get(course_id).unwrap();
                 swaps.push(proposal);
                 self.swaps.insert(&course_id, &swaps);
-                return;
-            }
-            let mut swaps = self.swaps.get(course_id).unwrap();
-            swaps.push(proposal);
-            self.swaps.insert(&course_id, &swaps);
-        }
-
-        /// retrieve swap proposals for a given course_id
-        #[ink(message)]
-        pub fn get_proposed_swaps(&self, course_id: [u8; 32]) -> Result<Vec<CourseRegistrationSwapProposal>, Error> {
-            if !self.swaps.contains(course_id) {
-                return Err(Error::NoProposedSwap);
-            }
-            Ok(self.swaps.get(course_id).unwrap())
-        }
-
-        /// Place a counter offer on a swap proposal
-        #[ink(message)]
-        pub fn counter_swap_proposal(&mut self, 
-                                     course_id: [u8;32],
-                                     offerer: AccountId,
-                                     counter_course_id: [u8; 32]) -> Result<(), Error> {
-            let caller = Self::env().caller();
-            let caller_regs = self.get_own_registrations();
-
-            if caller_regs.is_err() {
-                return Err(Error::NoProposedSwap);
             }
 
-            let mut caller_regs = caller_regs.unwrap();
-            let exchange_course = caller_regs.iter().position(|reg| reg.course_id == counter_course_id);
-
-            if exchange_course.is_none(){
-                return Err(Error::NoProposedSwap);
-            }
-            let exchange_course = exchange_course.unwrap();
-            let exchange_course = caller_regs.remove(exchange_course);
-            self.registrations.insert(&caller, &caller_regs);
-
-            if !self.swaps.contains(course_id) {
-                return Err(Error::NoProposedSwap);
-            }
-
-            let proposals = self.swaps.get(course_id).unwrap();
-            let mut found = false;
-
-            for mut proposal in proposals {
-                if proposal.offer.owner == offerer {
-                    found = true;
-                    proposal.counter_offers.push(exchange_course);
-                    break;
+            /// retrieve swap proposals for a given course_id
+            #[ink(message)]
+            pub fn get_proposed_swaps(&self, course_id: [u8; 32]) -> Result<Vec<CourseRegistrationSwapProposal>, Error> {
+                if !self.swaps.contains(course_id) {
+                    return Err(Error::NoProposedSwap);
                 }
-            }
-            if !found {
-                return Err(Error::NoProposedSwap);
+                let swaps = self.swaps.get(course_id);
+                if swaps.as_ref().unwrap().len() == 0 {
+                    return Err(Error::NoProposedSwap);
+                }
+                Ok(swaps.unwrap())
             }
 
-            Ok(())
-        }
+            /// Place a counter offer on a swap proposal
+            #[ink(message)]
+            pub fn counter_swap_proposal(&mut self, 
+                                         course_id: [u8;32],
+                                         offerer: AccountId,
+                                         counter_course_id: [u8; 32]) -> Result<(), Error> {
+                let caller = Self::env().caller();
+                // first we need to verify if the caller has the required
+                // registration to swap
+                let caller_regs = self.get_own_registrations();
 
-        /// returns true if the caller is the owner of the contract
-        fn is_owner(&self) -> bool {
-            let caller = Self::env().caller();
-            return caller == self.owner;
-        }
-        /// returns teh Keccak256 hash of the input bytes
-        pub fn hash_keccak_256(input: &[u8]) -> [u8; 32] {
-            let mut output = <hash::Keccak256 as hash::HashOutput>::Type::default();
-            ink_env::hash_bytes::<hash::Keccak256>(input, &mut output);
-            output
-        }
+                if caller_regs.is_err() {
+                    return Err(Error::NoProposedSwap);
+                }
+
+                let mut caller_regs = caller_regs.unwrap();
+                let exchange_course = caller_regs.iter().position(|reg| reg.course_id == counter_course_id);
+
+                if exchange_course.is_none() {
+                    return Err(Error::NoProposedSwap);
+                }
+
+                let exchange_course = exchange_course.unwrap();
+                let exchange_course = caller_regs.remove(exchange_course);
+                self.registrations.insert(&caller, &caller_regs); // caller's reg is removed
+
+                // find the proposal the counter offer belongs to
+                if !self.swaps.contains(course_id) {
+                    return Err(Error::NoProposedSwap);
+                }
+
+                let mut proposals = self.swaps.get(course_id).unwrap();
+
+                let found_prop = proposals.iter().position(|prop| prop.offer.owner == offerer);
+                if found_prop.is_none() {
+                    return Err(Error::NoProposedSwap);
+                }
+                let found_prop = found_prop.unwrap();
+                let prop = &mut proposals[found_prop];
+                prop.counter_offers.push(exchange_course);
+
+                // result is saved
+                self.swaps.insert(&course_id, &proposals);
+
+                Ok(())
+            }
+
+            /// accepts a swap counter offer to a swap proposed by the caller
+            #[ink(message)]
+            pub fn accept_counter_offer(&mut self, 
+                                        offered_course_id: [u8;32],
+                                        accepted_course_id: [u8;32],
+                                        accepted_owner: AccountId) -> Result<(), Error> {
+                let caller = Self::env().caller();
+                if !self.swaps.contains(offered_course_id) {
+                    return Err(Error::NoProposedSwap)
+                }
+
+                // find the proposal of the caller
+                let mut proposals = self.swaps.get(offered_course_id).unwrap();
+                let found_prop = proposals.iter().position(|prop| prop.offer.owner == caller);
+
+                if found_prop.is_none() {
+                    return Err(Error::NoProposedSwap)
+                }
+
+                // remove the proposal from the active proposals
+                let found_prop = found_prop.unwrap();
+                let mut found_prop = proposals.remove(found_prop);
+                self.swaps.insert(&offered_course_id, &proposals);
+                
+                // find the accepted counter offer
+                let found_counter = found_prop.counter_offers.iter()
+                                    .position(|counter_off| 
+                                              counter_off.owner == accepted_owner
+                                              && counter_off.course_id == accepted_course_id);
+                if found_counter.is_none() {
+                    return Err(Error::NoProposedSwap);
+                }
+                let found_counter = found_counter.unwrap();
+                let found_counter = found_prop.counter_offers.remove(found_counter);
+                if found_counter.owner != accepted_owner {
+                    return Err(Error::NoProposedSwap);
+                }
+
+                // perform the token swap
+                self.add_registration(accepted_course_id, caller);
+                self.add_registration(offered_course_id, found_counter.owner);
+
+                // change registrations in the course reg list
+                let rep_res = self.replace_registration_in_reg_list(accepted_course_id, accepted_owner, caller);
+                if rep_res.is_err() {
+                    return rep_res;
+                }
+                self.replace_registration_in_reg_list(offered_course_id, caller, accepted_owner)
+            }
+
+            fn replace_registration_in_reg_list(&mut self, course_id: [u8;32], replace:AccountId, with:AccountId) -> 
+                Result<(),Error> {
+                    let replace_in = self.courses.get(course_id);
+                    if replace_in.is_none() {
+                        return Err(Error::NoProposedSwap);
+                    }
+                    let mut replace_in = replace_in.unwrap();
+                    let reg = replace_in.registrations.iter().position(|acc_id| acc_id == &replace);
+                    if reg.is_none() {
+                        return Err(Error::NoProposedSwap);
+                    }
+                    replace_in.registrations[reg.unwrap()] = with;
+                    Ok(())
+                }
+
+            /// returns true if the caller is the owner of the contract
+            fn is_owner(&self) -> bool {
+                let caller = Self::env().caller();
+                return caller == self.owner;
+            }
+            /// returns teh Keccak256 hash of the input bytes
+            pub fn hash_keccak_256(input: &[u8]) -> [u8; 32] {
+                let mut output = <hash::Keccak256 as hash::HashOutput>::Type::default();
+                ink_env::hash_bytes::<hash::Keccak256>(input, &mut output);
+                output
+            }
     }
+
+
 
     /// Unit tests
     #[cfg(test)]
@@ -457,12 +530,10 @@ mod course_reg {
             assert_eq!(course_reg.get_proposed_swaps(course_id).unwrap().len(),1); 
             assert_eq!(course_reg.get_own_registrations(), Err(Error::NoRegistrations));
         }
-        //fn advance_block() {
-        //    ink_env::test::advance_block::<ink_env::DefaultEnvironment>();
-        //}
-        /// Counter swap proposal test
+
+        /// Full happy path test
         #[ink::test]
-        fn swap_proposal_counter() {
+        fn accept_counter_offer() {
             let owner = AccountId::from([0x0;32]);
             set_next_caller(owner);
             let mut course_reg = CourseReg::new(owner);
@@ -500,6 +571,11 @@ mod course_reg {
             assert_eq!(course_reg.counter_swap_proposal(course_id1, student1, course_id2), Ok(()));  
             set_next_caller(student2);
             assert_eq!(course_reg.get_own_registrations(), Err(Error::NoRegistrations));
+
+            set_next_caller(student1);
+            assert_eq!(course_reg.accept_counter_offer(course_id1, course_id2, student2), Ok(()));
+            let pos = course_reg.get_own_registrations().unwrap().iter().position(|course| course.course_id == course_id2);
+            assert!(!pos.is_none());
         }
     }
 }
